@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows.Forms;
 
 namespace PhrasePaste;
 
@@ -20,6 +22,7 @@ internal static class HotkeyManager
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private static readonly Dictionary<string, uint> KeyNames = BuildKeyNames();
+    private static readonly Dictionary<uint, string> PreferredKeyNames = BuildPreferredKeyNames();
 
     /// <summary>
     /// Parse a "Ctrl+Alt+1" style spec. Modifiers: Ctrl/Alt/Shift/Win (any order).
@@ -84,6 +87,80 @@ internal static class HotkeyManager
 
         combo = new HotkeyCombo(mods, vk, text);
         return true;
+    }
+
+    /// <summary>
+    /// Turn a captured key press into the same "Ctrl+Alt+1" syntax the config
+    /// and the parser use, so the editor can store what the user actually
+    /// pressed instead of asking them to spell it. Returns null for keys with
+    /// no representable name (media keys, browser keys, ...).
+    /// </summary>
+    public static string? Format(Keys key, bool ctrl, bool alt, bool shift, bool win)
+    {
+        var vk = (uint)(key & Keys.KeyCode);
+        if (!PreferredKeyNames.TryGetValue(vk, out var name)) return null;
+
+        var sb = new StringBuilder();
+        if (ctrl) sb.Append("Ctrl+");
+        if (alt) sb.Append("Alt+");
+        if (shift) sb.Append("Shift+");
+        if (win) sb.Append("Win+");
+        return sb.Append(name).ToString();
+    }
+
+    /// <summary>True when the spec carries at least one modifier.</summary>
+    public static bool HasModifier(string spec) =>
+        TryParse(spec, out var combo, out _) && combo.Modifiers != 0;
+
+    /// <summary>
+    /// Ask Windows whether a combo can be registered, by registering it on a
+    /// scratch id and releasing it again. False means another app (or another
+    /// phrase) already owns it.
+    /// </summary>
+    public static bool IsComboFree(IntPtr probeHandle, int probeId, uint modifiers, uint vk)
+    {
+        if (probeHandle == IntPtr.Zero) return true;
+        if (!RegisterHotKey(probeHandle, probeId, modifiers, vk)) return false;
+        UnregisterHotKey(probeHandle, probeId);
+        return true;
+    }
+
+    private static Dictionary<uint, string> BuildPreferredKeyNames()
+    {
+        var map = new Dictionary<uint, string>();
+        for (var i = 0; i < 26; i++) map[0x41u + (uint)i] = ((char)('A' + i)).ToString();
+        for (var i = 0; i < 10; i++) map[0x30u + (uint)i] = ((char)('0' + i)).ToString();
+        for (var i = 1; i <= 24; i++) map[0x70u + (uint)(i - 1)] = $"F{i}";
+
+        map[0x20] = "Space";
+        map[0x0D] = "Enter";
+        map[0x09] = "Tab";
+        map[0x08] = "Backspace";
+        map[0x2E] = "Delete";
+        map[0x2D] = "Insert";
+        map[0x24] = "Home";
+        map[0x23] = "End";
+        map[0x21] = "PageUp";
+        map[0x22] = "PageDown";
+        map[0x1B] = "Escape";
+        map[0x26] = "Up";
+        map[0x28] = "Down";
+        map[0x25] = "Left";
+        map[0x27] = "Right";
+        map[0xBB] = "Plus";
+        map[0xBD] = "Minus";
+        map[0xBE] = "Period";
+        map[0xBC] = "Comma";
+        map[0xBF] = "Slash";
+        map[0xBA] = "Semicolon";
+        map[0xDE] = "Apostrophe";
+        map[0xDC] = "Backslash";
+        map[0xDB] = "[";
+        map[0xDD] = "]";
+        map[0xC0] = "Tilde";
+        for (var i = 0; i < 10; i++) map[0x60u + (uint)i] = $"Num{i}";
+
+        return map;
     }
 
     private static Dictionary<string, uint> BuildKeyNames()
